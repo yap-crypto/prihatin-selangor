@@ -638,7 +638,7 @@ select:focus, textarea:focus, input:focus{
         <label>Email</label>
         <input type="email" id="authEmail" autocomplete="email" placeholder="you@example.com">
       </div>
-      <div class="field" id="passField" style="display:none;">
+      <div class="field" id="passField">
         <label>Password</label>
         <input type="password" id="authPass" autocomplete="current-password" placeholder="At least 6 characters">
       </div>
@@ -2403,10 +2403,10 @@ async function doResend(key, email, btn, noteEl){
   }
 }
 function applyAuthMode(){
-  // Instant email-only access — one field, no password, no confirmation step.
-  $('#authTitle').textContent = L('Enter your email','Masukkan e-mel anda');
-  $('#authSub').textContent   = L('No password, no waiting — your email is your account. Reports and profile sync across every device.',
-                                  'Tiada kata laluan, tiada menunggu — e-mel anda ialah akaun anda. Laporan & profil disegerak merentas semua peranti.');
+  // Email + password, no verification. One form that logs in or creates the account.
+  $('#authTitle').textContent = L('Sign in or sign up','Log masuk atau daftar');
+  $('#authSub').textContent   = L('Enter your email and a password. No confirmation email — new accounts are ready right away.',
+                                  'Masukkan e-mel dan kata laluan. Tiada e-mel pengesahan — akaun baharu terus sedia.');
   $('#authCta').textContent = L('Continue','Teruskan');
   setAuthErr('');
 }
@@ -2423,35 +2423,30 @@ function showAuth(){
   }
 }
 function showApp(){ $('#authScreen').hidden = true; $('#appShell').style.display = ''; }
-// Derive a stable per-email key so the account needs nothing but the email.
-async function derivePass(email){
-  const data = new TextEncoder().encode('prihatin-selangor::pw::v1::' + email);
-  const buf = await crypto.subtle.digest('SHA-256', data);
-  return 'ps_' + Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
-}
 async function submitAuth(){
   if(!cloud){ setAuthErr('Cloud is not configured.'); return; }
   const email = $('#authEmail').value.trim().toLowerCase();
+  const pass  = $('#authPass').value;
   if(!validEmail(email)){ setAuthErr(L('Enter a valid email address.','Masukkan alamat e-mel yang sah.')); return; }
+  if(pass.length < 6){ setAuthErr(L('Password needs at least 6 characters.','Kata laluan perlu sekurang-kurangnya 6 aksara.')); return; }
+  const wrongPw = L('That email already has an account — check your password.','E-mel itu sudah mempunyai akaun — semak kata laluan anda.');
   const cta=$('#authCta'); const prev=cta.textContent; cta.disabled=true; cta.textContent=L('One moment…','Sebentar…');
   try{
-    const pass = await derivePass(email);
-    // Returning user → straight in.
+    // Existing account → log in.
     const { error } = await cloud.auth.signInWithPassword({ email, password:pass });
     if(error){
-      // New email → create the account instantly (email confirmation is off).
+      // Either a new email, or a wrong password on an existing one — try to create it.
       const name = email.split('@')[0];
       const res = await cloud.auth.signUp({ email, password:pass, options:{ data:{ name } } });
       if(res.error){
-        setAuthErr(/registered|already/i.test(res.error.message)
-          ? L('This email already has an older account with a password. Reply to us and we’ll reset it.',
-              'E-mel ini sudah mempunyai akaun lama berkata laluan. Hubungi kami untuk set semula.')
-          : res.error.message);
+        setAuthErr(/registered|already/i.test(res.error.message) ? wrongPw : res.error.message);
         return;
       }
+      // Supabase returns a fake user with empty identities when the email already exists.
+      if(res.data.user && (res.data.user.identities||[]).length === 0){ setAuthErr(wrongPw); return; }
       if(!res.data.session){
         const retry = await cloud.auth.signInWithPassword({ email, password:pass });
-        if(retry.error){ setAuthErr(L('Almost there — try again in a moment.','Hampir siap — cuba lagi sebentar.')); return; }
+        if(retry.error){ setAuthErr(wrongPw); return; }
       }
     }
     // onAuthStateChange → enterUser takes it from here.
