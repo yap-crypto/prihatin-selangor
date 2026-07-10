@@ -626,10 +626,10 @@ select:focus, textarea:focus, input:focus{
     <div class="auth-mark" id="authMark"></div>
     <div id="authForm">
       <p class="auth-eyebrow">Prihatin Selangor</p>
-      <h2 id="authTitle">Welcome back</h2>
-      <p class="sub" id="authSub">Log in to pick up where you left off.</p>
+      <h2 id="authTitle">Enter your email</h2>
+      <p class="sub" id="authSub">No password, no waiting — your email is your account. Reports and profile sync across every device.</p>
       <p class="auth-err" id="authErr"></p>
-      <button type="button" class="resend-link" id="resendLoginBtn">Resend confirmation email</button>
+      <button type="button" class="resend-link" id="resendLoginBtn" style="display:none;">Resend confirmation email</button>
       <div class="field" id="nameField" style="display:none;">
         <label>Your name</label>
         <input type="text" id="authName" autocomplete="name" placeholder="e.g. Aiman Yusof">
@@ -638,12 +638,12 @@ select:focus, textarea:focus, input:focus{
         <label>Email</label>
         <input type="email" id="authEmail" autocomplete="email" placeholder="you@example.com">
       </div>
-      <div class="field">
+      <div class="field" id="passField" style="display:none;">
         <label>Password</label>
         <input type="password" id="authPass" autocomplete="current-password" placeholder="At least 6 characters">
       </div>
-      <button class="btn btn-primary" id="authCta">Log in</button>
-      <p class="auth-switch"><span id="authSwitchText">New here?</span> <button id="authSwitchBtn">Create one</button></p>
+      <button class="btn btn-primary" id="authCta">Continue</button>
+      <p class="auth-switch" id="authSwitch" style="display:none;"><span id="authSwitchText">New here?</span> <button id="authSwitchBtn">Create one</button></p>
     </div>
     <div id="confirmPanel" style="display:none;text-align:center;">
       <div class="ic" id="confirmIcon"></div>
@@ -686,8 +686,8 @@ select:focus, textarea:focus, input:focus{
 
 /* ==================== cloud + motion config ==================== */
 const APP_URL = 'https://yap-crypto.github.io/prihatin-selangor/'; // live site — email confirmation links land here
-const SUPABASE_URL = 'https://vbbqrcwuvwzxrejuuszd.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZiYnFyY3d1dnd6eHJlanV1c3pkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1NzEyOTUsImV4cCI6MjA5OTE0NzI5NX0.7WwCBLkvaectMHjR8s5bsSvSZoBy1lXXkCTa9f_HcL4';
+const SUPABASE_URL = 'https://ncxcnnkjzptnmkchylkd.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5jeGNubmtqenB0bm1rY2h5bGtkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2MDc0MjMsImV4cCI6MjA5OTE4MzQyM30.QGd6BOAx9cLMJeB904eT1gMEga-_BTMFknKwdZ6RaCQ';
 const CLOUD_TABLE = 'marketplace_data';
 const cloud = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase)
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
@@ -2403,14 +2403,11 @@ async function doResend(key, email, btn, noteEl){
   }
 }
 function applyAuthMode(){
-  const su = authMode==='signup';
-  $('#authTitle').textContent = su ? L('Create your account','Cipta akaun anda') : L('Welcome back','Selamat kembali');
-  $('#authSub').textContent   = su ? L('Save your reports & profile across every device.','Simpan laporan & profil anda merentas semua peranti.') : L('Log in to pick up where you left off.','Log masuk untuk menyambung semula.');
-  $('#nameField').style.display = su ? '' : 'none';
-  $('#authPass').setAttribute('autocomplete', su ? 'new-password' : 'current-password');
-  $('#authCta').textContent = su ? L('Create account','Cipta akaun') : L('Log in','Log masuk');
-  $('#authSwitchText').textContent = su ? L('Already have an account?','Sudah ada akaun?') : L('New here?','Baru di sini?');
-  $('#authSwitchBtn').textContent  = su ? L('Log in','Log masuk') : L('Create one','Cipta satu');
+  // Instant email-only access — one field, no password, no confirmation step.
+  $('#authTitle').textContent = L('Enter your email','Masukkan e-mel anda');
+  $('#authSub').textContent   = L('No password, no waiting — your email is your account. Reports and profile sync across every device.',
+                                  'Tiada kata laluan, tiada menunggu — e-mel anda ialah akaun anda. Laporan & profil disegerak merentas semua peranti.');
+  $('#authCta').textContent = L('Continue','Teruskan');
   setAuthErr('');
 }
 function showAuth(){
@@ -2426,39 +2423,40 @@ function showAuth(){
   }
 }
 function showApp(){ $('#authScreen').hidden = true; $('#appShell').style.display = ''; }
+// Derive a stable per-email key so the account needs nothing but the email.
+async function derivePass(email){
+  const data = new TextEncoder().encode('prihatin-selangor::pw::v1::' + email);
+  const buf = await crypto.subtle.digest('SHA-256', data);
+  return 'ps_' + Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
 async function submitAuth(){
   if(!cloud){ setAuthErr('Cloud is not configured.'); return; }
-  const email=$('#authEmail').value.trim(), pass=$('#authPass').value, name=$('#authName').value.trim();
+  const email = $('#authEmail').value.trim().toLowerCase();
   if(!validEmail(email)){ setAuthErr(L('Enter a valid email address.','Masukkan alamat e-mel yang sah.')); return; }
-  if(authMode==='signup' && !name){ setAuthErr(L('Enter your name to continue.','Masukkan nama anda untuk teruskan.')); return; }
-  if(pass.length<6){ setAuthErr(L('Password needs at least 6 characters.','Kata laluan perlu sekurang-kurangnya 6 aksara.')); return; }
-  const cta=$('#authCta'); cta.disabled=true;
+  const cta=$('#authCta'); const prev=cta.textContent; cta.disabled=true; cta.textContent=L('One moment…','Sebentar…');
   try{
-    if(authMode==='signup'){
-      const { data, error } = await cloud.auth.signUp({ email, password:pass, options:{ data:{ name }, emailRedirectTo: APP_URL } });
-      if(error){ setAuthErr(error.message); return; }
-      if(!data.session){
-        pendingConfirmEmail = email;
-        $('#authForm').style.display='none'; $('#confirmPanel').style.display='';
-        $('#confirmMsg').textContent = L('We sent a confirmation link to '+email+'. Click it, then come back here and log in.',
-                                         'Kami hantar pautan pengesahan ke '+email+'. Klik pautan itu, kemudian log masuk di sini.');
-        const rb=$('#resendBtn'), rn=$('#resendNote');
-        rn.classList.remove('show'); rn.textContent='';
-        resendCooldownUntil.panel = Date.now() + 30000; // Supabase just sent one — avoid an instant duplicate
-        tickResendCooldown('panel', rb);
+    const pass = await derivePass(email);
+    // Returning user → straight in.
+    const { error } = await cloud.auth.signInWithPassword({ email, password:pass });
+    if(error){
+      // New email → create the account instantly (email confirmation is off).
+      const name = email.split('@')[0];
+      const res = await cloud.auth.signUp({ email, password:pass, options:{ data:{ name } } });
+      if(res.error){
+        setAuthErr(/registered|already/i.test(res.error.message)
+          ? L('This email already has an older account with a password. Reply to us and we’ll reset it.',
+              'E-mel ini sudah mempunyai akaun lama berkata laluan. Hubungi kami untuk set semula.')
+          : res.error.message);
+        return;
       }
-    }else{
-      const { error } = await cloud.auth.signInWithPassword({ email, password:pass });
-      if(error){
-        const unconfirmed = /confirm/i.test(error.message);
-        if(unconfirmed) pendingConfirmEmail = email;
-        setAuthErr(unconfirmed
-          ? L('Email not confirmed yet — check your inbox for the link.','E-mel belum disahkan — semak peti masuk anda.')
-          : L('Wrong email or password.','E-mel atau kata laluan salah.'), unconfirmed);
+      if(!res.data.session){
+        const retry = await cloud.auth.signInWithPassword({ email, password:pass });
+        if(retry.error){ setAuthErr(L('Almost there — try again in a moment.','Hampir siap — cuba lagi sebentar.')); return; }
       }
     }
+    // onAuthStateChange → enterUser takes it from here.
   }catch(e){ setAuthErr(L('Could not reach the server. Check your connection and try again.','Tidak dapat menghubungi pelayan. Semak sambungan anda.')); }
-  finally{ cta.disabled=false; }
+  finally{ cta.disabled=false; cta.textContent=prev; }
 }
 async function enterUser(user){
   account = { email:user.email, uid:user.id, name:(user.user_metadata&&(user.user_metadata.name||user.user_metadata.full_name))||user.email.split('@')[0] };
